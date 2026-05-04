@@ -1,0 +1,210 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ==================== HELPER FUNCTIONS ====================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function isModerator() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'moderator';
+    }
+    
+    function hasValidData() {
+      return request.resource.data.keys().hasAll(['createdAt']);
+    }
+    
+    function isNotSpamming(collection, minutes) {
+      // Check if user has created too many items recently
+      return true; // Simplified - implement with cloud function for strict enforcement
+    }
+
+    // ==================== USERS ====================
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin(); // Only admins can delete users
+    }
+
+    // ==================== POSTS ====================
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.keys().hasAll(['content', 'userId', 'createdAt']);
+      allow update: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+        (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // ==================== STARTUPS ====================
+    match /startups/{startupId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && 
+        request.resource.data.ownerId == request.auth.uid &&
+        request.resource.data.keys().hasAll(['name', 'ownerId', 'createdAt']);
+      allow update: if isAuthenticated() && 
+        (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && 
+        (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    // ==================== INTERESTS ====================
+    match /interests/{interestId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && 
+        request.resource.data.investorId == request.auth.uid &&
+        !exists(/databases/$(database)/documents/interests/$(interestId));
+      allow update: if isAuthenticated() && 
+        resource.data.investorId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+        (resource.data.investorId == request.auth.uid || isAdmin());
+    }
+
+    // ==================== LIKES (Prevent Duplicates) ====================
+    match /likes/{likeId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if false; // Likes cannot be updated
+      allow delete: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+    }
+
+    // ==================== COMMENTS ====================
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.keys().hasAll(['text', 'userId', 'postId', 'createdAt']);
+      allow update: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+        (resource.data.userId == request.auth.uid || isAdmin() || isModerator());
+    }
+
+    // ==================== SUBSCRIPTIONS ====================
+    match /subscriptions/{subscriptionId} {
+      allow read: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      allow delete: if false; // Permanent record
+    }
+
+    // ==================== PAYMENTS ====================
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if false; // Permanent record
+    }
+
+    // ==================== BOOSTS ====================
+    match /boosts/{boostId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if false; // Permanent record
+    }
+
+    // ==================== REPORTS ====================
+    match /reports/{reportId} {
+      allow read: if isAdmin() || isModerator();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin() || isModerator();
+      allow delete: if isAdmin();
+    }
+
+    // ==================== FEEDBACK ====================
+    match /feedbackReports/{feedbackId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // ==================== ANALYTICS ====================
+    match /analyticsEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ==================== INVITES ====================
+    match /invites/{inviteId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if false;
+    }
+
+    // ==================== NOTIFICATIONS ====================
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && 
+        resource.data.userId == request.auth.uid;
+    }
+
+    // ==================== SYSTEM LOGS ====================
+    match /systemLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ==================== INVESTOR PREFERENCES ====================
+    match /investorPreferences/{userId} {
+      allow read: if isAuthenticated() && 
+        (isOwner(userId) || isAdmin());
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId);
+      allow delete: if isOwner(userId);
+    }
+
+    // ==================== CHATS ====================
+    match /chats/{chatId} {
+      allow read: if isAuthenticated() && 
+        request.auth.uid in resource.data.participants;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+        request.auth.uid in resource.data.participants;
+      allow delete: if false;
+    }
+
+    // ==================== MESSAGES ====================
+    match /messages/{messageId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if false;
+      allow delete: if isAuthenticated() && 
+        resource.data.senderId == request.auth.uid;
+    }
+  }
+}
